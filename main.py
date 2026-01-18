@@ -11,9 +11,11 @@ DM_DELAY = 1.7
 KICK_DELAY = 1.5
 MAX_CONCURRENT_DMS = 1
 
+# User IDs that will NEVER be affected
 EXCLUDED_USER_IDS = {1351694428527394876}
 
-# Set guild ID for instant slash updates (recommended)
+# Set this to a guild ID for instant slash command sync
+# Example: SYNC_GUILD_ID = 123456789012345678
 SYNC_GUILD_ID = None
 # ============================================
 
@@ -22,11 +24,13 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
 
+# ---------- INTENTS ----------
 intents = discord.Intents.default()
 intents.members = True
 intents.presences = True
 intents.message_content = True
 
+# ---------- BOT ----------
 class MyBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix=COMMAND_PREFIX, intents=intents)
@@ -57,6 +61,7 @@ async def run_mass_dm(guild, send_func, message, target_statuses):
 
     async def dm_member(member):
         nonlocal sent, failed
+
         if member.bot:
             return
         if member.id in EXCLUDED_USER_IDS:
@@ -72,12 +77,14 @@ async def run_mass_dm(guild, send_func, message, target_statuses):
             except:
                 failed += 1
 
-    await send_func("📨 **Starting mass DM...**")
+    await send_func("📨 Starting mass DM...")
     await asyncio.gather(*(dm_member(m) for m in guild.members))
     await send_func(f"✅ Done | Sent: `{sent}` | Failed: `{failed}`")
 
-# ================= DM COMMANDS =================
+# ================= SLASH COMMANDS =================
+
 @bot.tree.command(name="massdm", description="DM online/DND members")
+@app_commands.describe(message="Message to send")
 async def slash_massdm(interaction: discord.Interaction, message: str):
     await interaction.response.defer(ephemeral=True)
 
@@ -92,6 +99,7 @@ async def slash_massdm(interaction: discord.Interaction, message: str):
     )
 
 @bot.tree.command(name="massdm_offline", description="DM offline/invisible members")
+@app_commands.describe(message="Message to send")
 async def slash_massdm_offline(interaction: discord.Interaction, message: str):
     await interaction.response.defer(ephemeral=True)
 
@@ -106,53 +114,45 @@ async def slash_massdm_offline(interaction: discord.Interaction, message: str):
     )
 
 # ================= KICK ALL =================
-@bot.tree.command(
-    name="kickall",
-    description="Kick ALL members (DANGEROUS)"
-)
-@app_commands.describe(
-    confirm="Type CONFIRM to proceed",
-    reason="Kick reason"
-)
-async def kickall(
-    interaction: discord.Interaction,
-    confirm: str,
-    reason: str = "Mass kick"
-):
-    if confirm != "CONFIRM":
-        await interaction.response.send_message(
-            "❌ You must type **CONFIRM** to run this command.",
-            ephemeral=True
-        )
-        return
 
+@bot.tree.command(name="kickall", description="Kick all members")
+@app_commands.describe(reason="Kick reason")
+async def kickall(interaction: discord.Interaction, reason: str = "Kicked"):
     await interaction.response.defer(ephemeral=True)
 
+    guild = interaction.guild
     kicked = 0
     failed = 0
-    guild = interaction.guild
 
-    for member in guild.members:
-        if member.bot:
-            continue
-        if member.id in EXCLUDED_USER_IDS:
-            continue
-        if member == guild.owner:
-            continue
+    try:
+        for member in guild.members:
+            if member.bot:
+                continue
+            if member.id in EXCLUDED_USER_IDS:
+                continue
+            if member == guild.owner:
+                continue
 
-        try:
-            await member.kick(reason=reason)
-            kicked += 1
-            await asyncio.sleep(KICK_DELAY)
-        except:
-            failed += 1
+            # Bot cannot kick users with higher/equal role
+            if member.top_role >= guild.me.top_role:
+                failed += 1
+                continue
 
-    await interaction.followup.send(
-        f"⚠️ **Kickall complete**\n"
-        f"👢 Kicked: `{kicked}`\n"
-        f"❌ Failed: `{failed}`",
-        ephemeral=True
-    )
+            try:
+                await member.kick(reason=reason)
+                kicked += 1
+                await asyncio.sleep(KICK_DELAY)
+            except:
+                failed += 1
+
+    finally:
+        await interaction.followup.send(
+            f"👢 Kickall complete\n"
+            f"✅ Kicked: `{kicked}`\n"
+            f"❌ Failed: `{failed}`",
+            ephemeral=True
+        )
 
 # ================= RUN =================
+
 bot.run(os.getenv("DISCORD_TOKEN"))

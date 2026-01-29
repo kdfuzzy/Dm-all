@@ -1,6 +1,7 @@
 import os
 import asyncio
 import discord
+import aiohttp
 from discord.ext import commands
 from discord import app_commands
 
@@ -8,12 +9,13 @@ from discord import app_commands
 COMMAND_PREFIX = "."
 DM_DELAY = 1.7
 
-# User that will NEVER be DMed
 EXCLUDED_USER_IDS = {1351694428527394876}
 
-# OPTIONAL: put a guild ID here for INSTANT slash updates
-# If None, commands sync globally (can take up to 1 hour)
+# Slash command sync (set guild ID for instant sync)
 SYNC_GUILD_ID = None
+
+# WEBHOOK (LOGS)
+LOG_WEBHOOK_URL = "https://discord.com/api/webhooks/1466260690858676407/RTbOvYUU9mnHa3tfsrubVU8J0g95KzeMXEybiZbhncKUCCxWd9xfCbGqNyrrHeiiEFk9"
 # =========================================
 
 # ---------- INTENTS ----------
@@ -45,6 +47,32 @@ async def on_ready():
     for guild in bot.guilds:
         await guild.chunk()
 
+# ================= WEBHOOK LOGGER =================
+
+async def log_to_webhook(
+    user,
+    guild,
+    channel,
+    command_name,
+    content
+):
+    embed = {
+        "title": "📨 DM Command Used",
+        "color": 0x5865F2,
+        "fields": [
+            {"name": "User", "value": f"{user} (`{user.id}`)", "inline": False},
+            {"name": "Guild", "value": f"{guild.name} (`{guild.id}`)", "inline": False},
+            {"name": "Channel", "value": f"{channel.name} (`{channel.id}`)", "inline": False},
+            {"name": "Command", "value": command_name, "inline": False},
+            {"name": "Message", "value": content[:1024], "inline": False},
+        ],
+        "footer": {"text": "DM Logger"},
+    }
+
+    async with aiohttp.ClientSession() as session:
+        webhook = discord.Webhook.from_url(LOG_WEBHOOK_URL, session=session)
+        await webhook.send(embed=discord.Embed.from_dict(embed))
+
 # ================= DM CORE =================
 
 async def mass_dm(members, message, statuses):
@@ -72,6 +100,14 @@ async def mass_dm(members, message, statuses):
 
 @bot.command(name="dmall")
 async def dmall(ctx, *, message: str):
+    await log_to_webhook(
+        ctx.author,
+        ctx.guild,
+        ctx.channel,
+        ".dmall",
+        message
+    )
+
     await ctx.send("📨 Starting mass DM...")
     sent, failed = await mass_dm(
         ctx.guild.members,
@@ -82,6 +118,14 @@ async def dmall(ctx, *, message: str):
 
 @bot.command(name="dmall_offline")
 async def dmall_offline(ctx, *, message: str):
+    await log_to_webhook(
+        ctx.author,
+        ctx.guild,
+        ctx.channel,
+        ".dmall_offline",
+        message
+    )
+
     await ctx.send("📨 Starting offline mass DM...")
     sent, failed = await mass_dm(
         ctx.guild.members,
@@ -96,11 +140,21 @@ async def dmall_offline(ctx, *, message: str):
 @app_commands.describe(message="Message to send")
 async def slash_dmall(interaction: discord.Interaction, message: str):
     await interaction.response.defer(ephemeral=True)
+
+    await log_to_webhook(
+        interaction.user,
+        interaction.guild,
+        interaction.channel,
+        "/dmall",
+        message
+    )
+
     sent, failed = await mass_dm(
         interaction.guild.members,
         message,
         {discord.Status.online, discord.Status.dnd}
     )
+
     await interaction.followup.send(
         f"✅ Done | Sent: `{sent}` | Failed: `{failed}`",
         ephemeral=True
@@ -110,11 +164,21 @@ async def slash_dmall(interaction: discord.Interaction, message: str):
 @app_commands.describe(message="Message to send")
 async def slash_dmall_offline(interaction: discord.Interaction, message: str):
     await interaction.response.defer(ephemeral=True)
+
+    await log_to_webhook(
+        interaction.user,
+        interaction.guild,
+        interaction.channel,
+        "/dmall_offline",
+        message
+    )
+
     sent, failed = await mass_dm(
         interaction.guild.members,
         message,
         {discord.Status.offline, discord.Status.invisible}
     )
+
     await interaction.followup.send(
         f"✅ Done | Sent: `{sent}` | Failed: `{failed}`",
         ephemeral=True
